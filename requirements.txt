@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 streamlit>=1.32.0
 databricks-sql-connector>=3.0.0
 pandas>=2.0.0
@@ -6,13 +5,4 @@ plotly>=5.18.0
 pyarrow>=14.0.0
 plotnine>=0.13.0
 matplotlib>=3.8.0
-=======
-streamlit>=1.32.0
-databricks-sql-connector>=3.0.0
-pandas>=2.0.0
-plotly>=5.18.0
-pyarrow>=14.0.0
-plotnine>=0.13.0
-matplotlib>=3.8.0
->>>>>>> 2be25c30b568e78fd51a701684e5d780af6e4e4f
 scipy>=1.10.0

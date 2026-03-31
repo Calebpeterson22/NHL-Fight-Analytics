@@ -491,6 +491,9 @@ def load_fight_video(home_alias: str, away_alias: str, game_date: str, home_figh
 
 @st.cache_data(ttl=300)
 def load_player_profile(full_name: str) -> pd.DataFrame:
+    # Guard against None / empty / "nan" values arriving from missing DB data
+    if not full_name or str(full_name).strip() in ("", "nan", "None", "NaN"):
+        return pd.DataFrame()
     safe_name = full_name.replace("'", "''")
     try:
         return run_query(f"""
@@ -562,6 +565,15 @@ def load_jersey_stats() -> pd.DataFrame:
 # ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
+def _clean_fighter_name(raw) -> "str | None":
+    """Return a clean fighter name string, or None if the value is empty/null."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if s in ("", "nan", "None", "NaN"):
+        return None
+    return s
+
 def time_to_seconds(t: str) -> float:
     try:
         parts = str(t).split(":")
@@ -1193,8 +1205,18 @@ with main_tab1:
             selected_fight_row = effects_df[effects_df["fight_time"] == selected_ft] if selected_ft is not None else effects_df
             if selected_fight_row.empty:
                 selected_fight_row = effects_df
-            home_fighter_name = selected_fight_row["home_fighter"].iloc[0] if "home_fighter" in selected_fight_row.columns and not selected_fight_row.empty else None
-            away_fighter_name = selected_fight_row["away_fighter"].iloc[0] if "away_fighter" in selected_fight_row.columns and not selected_fight_row.empty else None
+
+            # Safe extraction — converts None/NaN/"nan" to Python None
+            home_fighter_name = _clean_fighter_name(
+                selected_fight_row["home_fighter"].iloc[0]
+                if "home_fighter" in selected_fight_row.columns and not selected_fight_row.empty
+                else None
+            )
+            away_fighter_name = _clean_fighter_name(
+                selected_fight_row["away_fighter"].iloc[0]
+                if "away_fighter" in selected_fight_row.columns and not selected_fight_row.empty
+                else None
+            )
 
             home_player_df = pd.DataFrame()
             away_player_df = pd.DataFrame()
@@ -1202,17 +1224,17 @@ with main_tab1:
                 try:
                     home_player_df = load_player_profile(home_fighter_name)
                 except Exception:
-                    pass
+                    home_player_df = pd.DataFrame()
             if away_fighter_name:
                 try:
                     away_player_df = load_player_profile(away_fighter_name)
                 except Exception:
-                    pass
+                    away_player_df = pd.DataFrame()
 
             col_away, col_chart, col_home = st.columns([1.4, 4, 1.4])
             with col_away:
                 render_player_card(away_player_df, away_fighter_name or "Away Fighter",
-                                   is_winner=(voted == away_fighter_name), align="left")
+                                   is_winner=(bool(away_fighter_name) and voted == away_fighter_name), align="left")
             with col_chart:
                 chart = build_goal_chart(filtered_df, selected_fight_time=selected_ft)
                 fig = chart.draw()
@@ -1224,7 +1246,7 @@ with main_tab1:
                 plt.close(fig)
             with col_home:
                 render_player_card(home_player_df, home_fighter_name or "Home Fighter",
-                                   is_winner=(voted == home_fighter_name), align="left")
+                                   is_winner=(bool(home_fighter_name) and voted == home_fighter_name), align="left")
 
             st.markdown("<hr style='border-color:#b8c8f8;margin:1.2rem 0;'>", unsafe_allow_html=True)
 

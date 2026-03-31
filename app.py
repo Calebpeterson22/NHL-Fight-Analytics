@@ -11,9 +11,12 @@ import os
 from databricks import sql  # or whatever client you use
 
 # --- Setup Databricks credentials ---
-DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
-DATABRICKS_HOST = os.getenv("DATABRICKS_HOST")
-DATABRICKS_CLUSTER = os.getenv("DATABRICKS_CLUSTER")
+import os
+
+DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST")
+DATABRICKS_HTTP_PATH = os.environ.get("DATABRICKS_HTTP_PATH")
+DATABRICKS_TOKEN = os.environ.get("DATABRICKS_TOKEN")
+DATABRICKS_WAREHOUSE_ID = os.environ.get("DATABRICKS_WAREHOUSE_ID")
 
 # fallback to local secrets.toml for local dev
 if DATABRICKS_TOKEN is None:

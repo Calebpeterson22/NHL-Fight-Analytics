@@ -1092,13 +1092,12 @@ with main_tab1:
     with filter_col3:
         if selected_team == "All Teams":
             team_fights = fights_index
-            all_players = sorted(set(
-                team_fights["home_fighter"].dropna().tolist() +
-                team_fights["away_fighter"].dropna().tolist()
-            ))
+            home_fighters = team_fights["home_fighter"].dropna().tolist() if "home_fighter" in team_fights.columns else []
+            away_fighters = team_fights["away_fighter"].dropna().tolist() if "away_fighter" in team_fights.columns else []
+            all_players = sorted(set(home_fighters + away_fighters))
         else:
-            home_team_fighters = fights_index[fights_index["home_alias"] == selected_team]["home_fighter"].dropna().tolist()
-            away_team_fighters = fights_index[fights_index["away_alias"] == selected_team]["away_fighter"].dropna().tolist()
+            home_team_fighters = fights_index[fights_index["home_alias"] == selected_team]["home_fighter"].dropna().tolist() if "home_fighter" in fights_index.columns else []
+            away_team_fighters = fights_index[fights_index["away_alias"] == selected_team]["away_fighter"].dropna().tolist() if "away_fighter" in fights_index.columns else []
             all_players = sorted(set(home_team_fighters + away_team_fighters))
 
         player_options = ["All Players"] + [p for p in all_players if p.strip()]
@@ -1119,10 +1118,11 @@ with main_tab1:
             ]
 
         if selected_player != "All Players":
-            filtered_fights = filtered_fights[
-                (filtered_fights["home_fighter"] == selected_player) |
-                (filtered_fights["away_fighter"] == selected_player)
-            ]
+            if "home_fighter" in filtered_fights.columns and "away_fighter" in filtered_fights.columns:
+                filtered_fights = filtered_fights[
+                    (filtered_fights["home_fighter"] == selected_player) |
+                    (filtered_fights["away_fighter"] == selected_player)
+                ]
 
         fight_labels = filtered_fights["fight_label"].tolist()
         display_options = ["— Select a fight —"] + fight_labels
@@ -1205,8 +1205,6 @@ with main_tab1:
             selected_fight_row = effects_df[effects_df["fight_time"] == selected_ft] if selected_ft is not None else effects_df
             if selected_fight_row.empty:
                 selected_fight_row = effects_df
-
-            # Safe extraction — converts None/NaN/"nan" to Python None
             home_fighter_name = _clean_fighter_name(
                 selected_fight_row["home_fighter"].iloc[0]
                 if "home_fighter" in selected_fight_row.columns and not selected_fight_row.empty

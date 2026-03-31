@@ -13,18 +13,16 @@ from databricks import sql  # or whatever client you use
 # --- Setup Databricks credentials ---
 import os
 
+import os
+
 DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST")
 DATABRICKS_HTTP_PATH = os.environ.get("DATABRICKS_HTTP_PATH")
 DATABRICKS_TOKEN = os.environ.get("DATABRICKS_TOKEN")
 DATABRICKS_WAREHOUSE_ID = os.environ.get("DATABRICKS_WAREHOUSE_ID")
 
-# fallback to local secrets.toml for local dev
-if DATABRICKS_TOKEN is None:
-    DATABRICKS_TOKEN = st.secrets["DATABRICKS_TOKEN"]
+# Example check
 if DATABRICKS_HOST is None:
-    DATABRICKS_HOST = st.secrets["DATABRICKS_HOST"]
-if DATABRICKS_CLUSTER is None:
-    DATABRICKS_CLUSTER = st.secrets["DATABRICKS_CLUSTER"]
+    raise ValueError("Missing DATABRICKS_HOST environment variable")
 
 # --- Connect to Databricks ---
 try:

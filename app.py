@@ -46,7 +46,7 @@ if DATABRICKS_HOST is None:
 try:
     connection = sql.connect(
         server_hostname=DATABRICKS_HOST,
-        http_path=DATABRICKS_CLUSTER,
+        http_path=DATABRICKS_HTTP_PATH,
         access_token=DATABRICKS_TOKEN
     )
 except Exception as e:

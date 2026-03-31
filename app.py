@@ -1035,10 +1035,20 @@ except Exception as e:
     top5_index = pd.DataFrame()
 
 # ── Build combined index ──
-combined_index = pd.concat([fights_index, top5_index], ignore_index=True).drop_duplicates(subset=["fight_label"]) if not fights_index.empty else top5_index
+def _has_fight_label(df):
+    return not df.empty and "fight_label" in df.columns
+
+if _has_fight_label(fights_index) and _has_fight_label(top5_index):
+    combined_index = pd.concat([fights_index, top5_index], ignore_index=True).drop_duplicates(subset=["fight_label"])
+elif _has_fight_label(fights_index):
+    combined_index = fights_index
+elif _has_fight_label(top5_index):
+    combined_index = top5_index
+else:
+    combined_index = pd.DataFrame()
 
 with main_tab1:
-    all_fight_labels = fights_index["fight_label"].tolist() if not fights_index.empty else []
+    all_fight_labels = fights_index["fight_label"].tolist() if _has_fight_label(fights_index) else []
 
     # Top 5 section
     st.markdown(
@@ -1124,7 +1134,7 @@ with main_tab1:
                     (filtered_fights["away_fighter"] == selected_player)
                 ]
 
-        fight_labels = filtered_fights["fight_label"].tolist()
+        fight_labels = filtered_fights["fight_label"].tolist() if "fight_label" in filtered_fights.columns else []
         display_options = ["— Select a fight —"] + fight_labels
         current_selected = st.session_state.get("selected_fight_label", None)
         select_index = fight_labels.index(current_selected) + 1 if current_selected and current_selected in fight_labels else 0

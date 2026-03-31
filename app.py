@@ -13,13 +13,31 @@ from databricks import sql  # or whatever client you use
 # --- Setup Databricks credentials ---
 import os
 
-import os
-
+# Attempt to get secrets from environment variables first (Railway)
 DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST")
 DATABRICKS_HTTP_PATH = os.environ.get("DATABRICKS_HTTP_PATH")
 DATABRICKS_TOKEN = os.environ.get("DATABRICKS_TOKEN")
 DATABRICKS_WAREHOUSE_ID = os.environ.get("DATABRICKS_WAREHOUSE_ID")
 
+# Fallback to Streamlit secrets for local development
+if DATABRICKS_HOST is None:
+    import streamlit as st
+    DATABRICKS_HOST = st.secrets.get("DATABRICKS_HOST")
+    DATABRICKS_HTTP_PATH = st.secrets.get("DATABRICKS_HTTP_PATH")
+    DATABRICKS_TOKEN = st.secrets.get("DATABRICKS_TOKEN")
+    DATABRICKS_WAREHOUSE_ID = st.secrets.get("DATABRICKS_WAREHOUSE_ID")
+
+# Verify required secrets exist
+required_vars = {
+    "DATABRICKS_HOST": DATABRICKS_HOST,
+    "DATABRICKS_HTTP_PATH": DATABRICKS_HTTP_PATH,
+    "DATABRICKS_TOKEN": DATABRICKS_TOKEN,
+    "DATABRICKS_WAREHOUSE_ID": DATABRICKS_WAREHOUSE_ID
+}
+
+missing_vars = [k for k, v in required_vars.items() if not v]
+if missing_vars:
+    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 # Example check
 if DATABRICKS_HOST is None:
     raise ValueError("Missing DATABRICKS_HOST environment variable")

@@ -19,13 +19,6 @@ DATABRICKS_HTTP_PATH = os.environ.get("DATABRICKS_HTTP_PATH")
 DATABRICKS_TOKEN = os.environ.get("DATABRICKS_TOKEN")
 DATABRICKS_WAREHOUSE_ID = os.environ.get("DATABRICKS_WAREHOUSE_ID")
 
-# Fallback to Streamlit secrets for local development
-if DATABRICKS_HOST is None:
-    import streamlit as st
-    DATABRICKS_HOST = st.secrets.get("DATABRICKS_HOST")
-    DATABRICKS_HTTP_PATH = st.secrets.get("DATABRICKS_HTTP_PATH")
-    DATABRICKS_TOKEN = st.secrets.get("DATABRICKS_TOKEN")
-    DATABRICKS_WAREHOUSE_ID = st.secrets.get("DATABRICKS_WAREHOUSE_ID")
 
 # Verify required secrets exist
 required_vars = {
@@ -304,10 +297,11 @@ st.markdown("""
 # ─────────────────────────────────────────────
 # DATABRICKS REST API
 # ─────────────────────────────────────────────
+
 def run_query(sql: str) -> pd.DataFrame:
-    host         = st.secrets["DATABRICKS_HOST"]
-    token        = st.secrets["DATABRICKS_TOKEN"]
-    warehouse_id = st.secrets["DATABRICKS_WAREHOUSE_ID"]
+    host         = os.environ["DATABRICKS_HOST"]
+    token        = os.environ["DATABRICKS_TOKEN"]
+    warehouse_id = os.environ["DATABRICKS_WAREHOUSE_ID"]
 
     response = requests.post(
         f"https://{host}/api/2.0/sql/statements",

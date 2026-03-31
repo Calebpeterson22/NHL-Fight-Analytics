@@ -943,7 +943,8 @@ def render_player_card(player_df: pd.DataFrame, fighter_name: str, is_winner: bo
 # ─────────────────────────────────────────────
 
 
-RINK_URL = "https://github.com/Calebpeterson22/NHL-Fight-Analytics/main/hockey_rink_2.jpg"
+
+RINK_URL = "https://raw.githubusercontent.com/Calebpeterson22/NHL-Fight-Analytics/main/hockey_rink_2.jpg"
 
 def build_rink_map(coords_df: pd.DataFrame, selected_fight_time: float = None) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(12, 6))

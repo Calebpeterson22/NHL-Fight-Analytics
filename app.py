@@ -7,6 +7,32 @@ import numpy as np
 import random
 from plotnine import *
 import io
+import os
+from databricks import sql  # or whatever client you use
+
+# --- Setup Databricks credentials ---
+DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
+DATABRICKS_HOST = os.getenv("DATABRICKS_HOST")
+DATABRICKS_CLUSTER = os.getenv("DATABRICKS_CLUSTER")
+
+# fallback to local secrets.toml for local dev
+if DATABRICKS_TOKEN is None:
+    DATABRICKS_TOKEN = st.secrets["DATABRICKS_TOKEN"]
+if DATABRICKS_HOST is None:
+    DATABRICKS_HOST = st.secrets["DATABRICKS_HOST"]
+if DATABRICKS_CLUSTER is None:
+    DATABRICKS_CLUSTER = st.secrets["DATABRICKS_CLUSTER"]
+
+# --- Connect to Databricks ---
+try:
+    connection = sql.connect(
+        server_hostname=DATABRICKS_HOST,
+        http_path=DATABRICKS_CLUSTER,
+        access_token=DATABRICKS_TOKEN
+    )
+except Exception as e:
+    st.error("Could not connect to Databricks: " + str(e))
+    st.stop()
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG
@@ -253,6 +279,7 @@ st.markdown("""
         }
     </style>
 """, unsafe_allow_html=True)
+
 
 
 # ─────────────────────────────────────────────

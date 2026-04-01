@@ -6,3 +6,4 @@ pyarrow>=14.0.0
 plotnine>=0.13.0
 matplotlib>=3.8.0
 scipy>=1.10.0
+squarify>=0.4.3

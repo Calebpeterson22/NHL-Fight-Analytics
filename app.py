@@ -1397,40 +1397,70 @@ with main_tab2:
         col1, col2, col3 = st.columns(3)
 
         # ── COL 1: Top Fighters  +  Jersey Numbers ─────────────────────────
+        col1, col2, col3 = st.columns(3)
+
         with col1:
-            # Chart 1 — Top 10 Fighters by Wins
-                        # Chart 1 — Fighter Scatter Plot
-            st.markdown(_card("Fighters: Win Rate vs Total Fights"), unsafe_allow_html=True)
-            scatter_df = record_df[record_df["fights"] >= 0].copy()  # filter noise
-            fig1, ax1 = plt.subplots(figsize=(4.5, 4))
+    # Chart 1 — Fighter Lollipop Chart
+            st.markdown(_card("Top Fighters by Win %"), unsafe_allow_html=True)
+            scatter_df = record_df[record_df["fights"] >= 0].copy()
+            scatter_df["last"] = scatter_df["player"].apply(
+                lambda x: x.split(".")[-1].strip() if "." in x else x.split()[-1]
+            )
+            top10 = scatter_df.nlargest(10, "fights").sort_values(["win_pct", "fights"])
+
+            fig1, ax1 = plt.subplots(figsize=(4.5, 5.5))
             fig1.patch.set_facecolor("#ffffff")
             ax1.set_facecolor("#f0f3fb")
 
-            ax1.scatter(
-                scatter_df["win_pct"],
-                scatter_df["fights"],
-                color="#2563eb",
-                alpha=0.75,
-                s=60,
-                zorder=3,
-                edgecolors="#1e3a8a",
-                linewidths=0.5,
+            dot_colors = ["#1a8a4a" if w >= 50 else "#ea580c" for w in top10["win_pct"]]
+
+            # Stems
+            ax1.hlines(
+                y=top10["last"],
+                xmin=0,
+                xmax=top10["win_pct"],
+                color="#c8d4f0",
+                linewidth=1.5,
+                zorder=1,
             )
 
-            for _, r in scatter_df.iterrows():
-                last = r["player"].split(".")[-1].strip() if "." in r["player"] else r["player"].split()[-1]
-                ax1.annotate(
-                    last,
-                    (r["win_pct"], r["fights"]),
-                    textcoords="offset points",
-                    xytext=(5, 3),
-                    fontsize=5.5,
-                    color="#1e3a8a",
+            # Dots
+            ax1.scatter(
+                top10["win_pct"],
+                top10["last"],
+                s=60,
+                color=dot_colors,
+                zorder=3,
+                edgecolors="white",
+                linewidths=0.8,
+            )
+
+            # Labels on each dot
+            for _, r in top10.iterrows():
+                ax1.text(
+                    r["win_pct"] + 0.5,
+                    r["last"],
+                    f'{int(r["win_pct"])}% ({int(r["fights"])} fights)',
+                    va="center",
+                    fontsize=6,
+                    color="#0d0d26",
                 )
 
             ax1.set_xlabel("Win %", color="#4a65c0", fontsize=8)
-            _style_ax(ax1, ylabel="Total Fights")
-            ax1.axvline(50, color="#ea580c", linewidth=0.8, linestyle="--", alpha=0.6)  # 50% reference line
+            ax1.set_xlim(0, 115)
+            ax1.tick_params(axis="y", labelsize=7)
+            ax1.grid(axis="x", color="#e0e7f5", linewidth=0.5, zorder=0)
+
+            import matplotlib.patches as mpatches
+            ax1.legend(
+                handles=[
+                    mpatches.Patch(color="#1a8a4a", label="Win % ≥ 50"),
+                    mpatches.Patch(color="#ea580c", label="Win % < 50"),
+                ],
+                fontsize=6.5, facecolor="#ffffff", edgecolor="#c8d4f0", loc="lower right"
+            )
+
+            _style_ax(ax1, ylabel="")
             plt.tight_layout(pad=0.4)
             buf1 = io.BytesIO()
             fig1.savefig(buf1, format="png", dpi=150, bbox_inches="tight", facecolor="#ffffff")
@@ -1438,7 +1468,6 @@ with main_tab2:
             st.image(buf1, use_container_width=True)
             plt.close(fig1)
             st.markdown(CARD_CLOSE, unsafe_allow_html=True)
-
             # Chart 3 — Jersey Numbers
             st.markdown(_card("Most Common Jersey #s"), unsafe_allow_html=True)
             if not jersey_df.empty:
@@ -1456,7 +1485,7 @@ with main_tab2:
                 for bar in bars3:
                     h = bar.get_height()
                     ax3.text(bar.get_x() + bar.get_width()/2, h + 0.05, str(int(h)),
-                             ha="center", va="bottom", fontsize=7, color="#1d4ed8", fontweight="bold")
+                            ha="center", va="bottom", fontsize=7, color="#1d4ed8", fontweight="bold")
                 ax3.set_xticks(x3)
                 ax3.set_xticklabels(["#" + j for j in jc["jersey"]], fontsize=7.5, color="#0d0d26")
                 _style_ax(ax3, ylabel="Fighters")
@@ -1477,43 +1506,31 @@ with main_tab2:
             if not timing_df.empty:
                 timing_df["fight_time"] = pd.to_numeric(timing_df["fight_time"], errors="coerce")
                 timing_df = timing_df.dropna(subset=["fight_time"])
-                # Convert seconds to game minute (1-60 for regulation, cap OT at 65+)
                 timing_df["minute"] = (timing_df["fight_time"] // 60).astype(int)
-                # Build per-minute counts across all 60 min buckets
                 max_min = int(timing_df["minute"].max()) + 1
                 minute_counts = timing_df.groupby("minute").size().reset_index(name="count")
                 all_minutes = pd.DataFrame({"minute": range(0, max_min)})
                 minute_counts = all_minutes.merge(minute_counts, on="minute", how="left").fillna(0)
 
-                # Color bars by period
                 def _period_color(m):
-                    if m < 20:   return "#1d4ed8"   # P1 — blue
-                    elif m < 40: return "#ea580c"   # P2 — orange
-                    elif m < 60: return "#1a8a4a"   # P3 — green
-                    else:        return "#9333ea"   # OT — purple
+                    if m < 20:   return "#1d4ed8"
+                    elif m < 40: return "#ea580c"
+                    elif m < 60: return "#1a8a4a"
+                    else:        return "#9333ea"
 
                 bar_colors = [_period_color(m) for m in minute_counts["minute"]]
-
                 fig6, ax6 = plt.subplots(figsize=(4.5, 3.2))
                 fig6.patch.set_facecolor("#ffffff")
                 ax6.set_facecolor("#f0f3fb")
-                ax6.bar(minute_counts["minute"], minute_counts["count"],
-                        color=bar_colors, alpha=0.9, width=0.85)
-
-                # Period dividers
+                ax6.bar(minute_counts["minute"], minute_counts["count"], color=bar_colors, alpha=0.9, width=0.85)
                 for xline, label in [(20, "P2"), (40, "P3"), (60, "OT")]:
                     if xline < max_min:
                         ax6.axvline(xline, color="#a8bae8", linewidth=1, linestyle="--", zorder=3)
-                        ax6.text(xline + 0.4, ax6.get_ylim()[1] * 0.92,
-                                 label, fontsize=6.5, color="#4a5580", va="top")
-
+                        ax6.text(xline + 0.4, ax6.get_ylim()[1] * 0.92, label, fontsize=6.5, color="#4a5580", va="top")
                 ax6.set_xlabel("Game Minute", color="#4a5580", fontsize=8)
                 _style_ax(ax6, ylabel="Fights")
-                # Tick every 5 min
                 ax6.set_xticks(range(0, max_min, 5))
                 ax6.set_xticklabels([str(m) for m in range(0, max_min, 5)], fontsize=7)
-
-                # Legend patches
                 import matplotlib.patches as mpatches
                 legend_patches = [
                     mpatches.Patch(color="#1d4ed8", label="P1"),
@@ -1523,8 +1540,7 @@ with main_tab2:
                 if max_min > 60:
                     legend_patches.append(mpatches.Patch(color="#9333ea", label="OT"))
                 ax6.legend(handles=legend_patches, fontsize=6.5, facecolor="#ffffff",
-                           edgecolor="#c8d4f0", loc="upper right", ncol=len(legend_patches))
-
+                        edgecolor="#c8d4f0", loc="upper right", ncol=len(legend_patches))
                 plt.tight_layout(pad=0.4)
                 buf6 = io.BytesIO()
                 fig6.savefig(buf6, format="png", dpi=150, bbox_inches="tight", facecolor="#ffffff")
@@ -1535,23 +1551,31 @@ with main_tab2:
                 st.info("Fight timing data unavailable.")
             st.markdown(CARD_CLOSE, unsafe_allow_html=True)
 
-        # ── COL 2: Fight-Prone Teams  +  Position Volume ───────────────────
         with col2:
             # Chart 2 — Most Fight-Prone Teams
+            # Chart 2 — Team Treemap
+            import squarify
+
             st.markdown(_card("Most Fight-Prone Teams"), unsafe_allow_html=True)
             ts = team_stats.sort_values("fights", ascending=False)
             fig2, ax2 = plt.subplots(figsize=(4.5, 4))
             fig2.patch.set_facecolor("#ffffff")
-            ax2.set_facecolor("#f0f3fb")
-            x2 = np.arange(len(ts))
-            colors2 = [NHL_COLORS.get(str(t), "#2563eb") for t in ts["team"]]
-            ax2.bar(x2, ts["fights"], color=colors2, alpha=0.9, width=0.6)
-            for i, v in enumerate(ts["fights"]):
-                ax2.text(x2[i], v + 0.1, str(int(v)), ha="center", va="bottom",
-                         fontsize=6.5, color="#0d0d26", fontweight="bold")
-            ax2.set_xticks(x2)
-            ax2.set_xticklabels(ts["team"], fontsize=7, color="#0d0d26", rotation=35, ha="right")
-            _style_ax(ax2, ylabel="Total Fights")
+
+            sizes = ts["fights"].tolist()
+            labels = [f"{row['team']}\n{int(row['fights'])}" for _, row in ts.iterrows()]
+            colors = [NHL_COLORS.get(str(t), "#2563eb") for t in ts["team"]]
+
+            squarify.plot(
+                sizes=sizes,
+                label=labels,
+                color=colors,
+                alpha=0.85,
+                ax=ax2,
+                text_kwargs={"fontsize": 7, "color": "white", "fontweight": "bold"},
+                pad=1,
+            )
+
+            ax2.axis("off")
             plt.tight_layout(pad=0.4)
             buf2 = io.BytesIO()
             fig2.savefig(buf2, format="png", dpi=150, bbox_inches="tight", facecolor="#ffffff")
@@ -1559,6 +1583,7 @@ with main_tab2:
             st.image(buf2, use_container_width=True)
             plt.close(fig2)
             st.markdown(CARD_CLOSE, unsafe_allow_html=True)
+
 
             # Chart 4 — Fight Volume by Position
             st.markdown(_card("Fights by Position"), unsafe_allow_html=True)
@@ -1584,7 +1609,7 @@ with main_tab2:
                 for bar in bars4:
                     h = bar.get_height()
                     ax4.text(bar.get_x() + bar.get_width()/2, h + 0.3, str(int(h)),
-                             ha="center", va="bottom", fontsize=8, color="#0d0d26", fontweight="bold")
+                            ha="center", va="bottom", fontsize=8, color="#0d0d26", fontweight="bold")
                 ax4.set_xticks(x4)
                 ax4.set_xticklabels(pos_counts["position"], fontsize=9, color="#0d0d26", fontweight="600")
                 _style_ax(ax4, ylabel="Fights")
@@ -1598,6 +1623,42 @@ with main_tab2:
                 st.info("Position data unavailable.")
             st.markdown(CARD_CLOSE, unsafe_allow_html=True)
 
+            # Chart 5 — Avg Goals Delta by Position
+            st.markdown(_card("Avg Goals Delta by Position"), unsafe_allow_html=True)
+            with st.spinner(""):
+                pos_inf_df = load_position_influence()
+            if not pos_inf_df.empty:
+                pos_inf_df["avg_goals_delta"] = pd.to_numeric(pos_inf_df["avg_goals_delta"], errors="coerce")
+                pos_inf_df["fight_count"] = pd.to_numeric(pos_inf_df["fight_count"], errors="coerce")
+                pos_inf_df = pos_inf_df.sort_values("avg_goals_delta", ascending=False)
+                colors_inf = [POS_COLORS.get(str(p), "#5a6899") for p in pos_inf_df["primary_position"]]
+                fig5, ax5 = plt.subplots(figsize=(4.5, 3.2))
+                fig5.patch.set_facecolor("#ffffff")
+                ax5.set_facecolor("#f0f3fb")
+                x5 = np.arange(len(pos_inf_df))
+                bars5 = ax5.bar(x5, pos_inf_df["avg_goals_delta"], color=colors_inf, alpha=0.9, width=0.5)
+                for bar in bars5:
+                    h = bar.get_height()
+                    ax5.text(bar.get_x() + bar.get_width()/2,
+                            h + (0.003 if h >= 0 else -0.015), f"{h:.2f}",
+                            ha="center", va="bottom" if h >= 0 else "top",
+                            fontsize=7.5, color="#0d0d26", fontweight="bold")
+                ax5.axhline(0, color="#a8bae8", linewidth=1)
+                ax5.set_xticks(x5)
+                ax5.set_xticklabels(pos_inf_df["primary_position"], fontsize=9, color="#0d0d26", fontweight="600")
+                _style_ax(ax5, ylabel="Avg Δ Goals/60")
+                for i, (_, row) in enumerate(pos_inf_df.iterrows()):
+                    ax5.text(x5[i], ax5.get_ylim()[0] * 0.92, f"n={int(row['fight_count'])}",
+                            ha="center", va="top", fontsize=6.5, color="#4a5580")
+                plt.tight_layout(pad=0.4)
+                buf5 = io.BytesIO()
+                fig5.savefig(buf5, format="png", dpi=150, bbox_inches="tight", facecolor="#ffffff")
+                buf5.seek(0)
+                st.image(buf5, use_container_width=True)
+                plt.close(fig5)
+            else:
+                st.info("Position influence data not available.")
+            st.markdown(CARD_CLOSE, unsafe_allow_html=True)
         # ── COL 3: Team Bruisers table  +  Goals Delta chart ──────────────
         with col3:
             # Table — Team Bruisers
@@ -1626,45 +1687,7 @@ with main_tab2:
             )
             st.markdown(CARD_CLOSE, unsafe_allow_html=True)
 
-            # Chart 5 — Avg Goals Delta by Position
-            st.markdown(_card("Avg Goals Delta by Position"), unsafe_allow_html=True)
-            with st.spinner(""):
-                pos_inf_df = load_position_influence()
-            if not pos_inf_df.empty:
-                pos_inf_df["avg_goals_delta"] = pd.to_numeric(pos_inf_df["avg_goals_delta"], errors="coerce")
-                pos_inf_df["fight_count"] = pd.to_numeric(pos_inf_df["fight_count"], errors="coerce")
-                pos_inf_df = pos_inf_df.sort_values("avg_goals_delta", ascending=False)
-                colors_inf = [POS_COLORS.get(str(p), "#5a6899") for p in pos_inf_df["primary_position"]]
-                fig5, ax5 = plt.subplots(figsize=(4.5, 3.2))
-                fig5.patch.set_facecolor("#ffffff")
-                ax5.set_facecolor("#f0f3fb")
-                x5 = np.arange(len(pos_inf_df))
-                bars5 = ax5.bar(x5, pos_inf_df["avg_goals_delta"], color=colors_inf, alpha=0.9, width=0.5)
-                for bar in bars5:
-                    h = bar.get_height()
-                    ax5.text(bar.get_x() + bar.get_width()/2,
-                             h + (0.003 if h >= 0 else -0.015),
-                             f"{h:.2f}",
-                             ha="center", va="bottom" if h >= 0 else "top",
-                             fontsize=7.5, color="#0d0d26", fontweight="bold")
-                ax5.axhline(0, color="#a8bae8", linewidth=1)
-                ax5.set_xticks(x5)
-                ax5.set_xticklabels(pos_inf_df["primary_position"], fontsize=9, color="#0d0d26", fontweight="600")
-                _style_ax(ax5, ylabel="Avg Δ Goals/60")
-                for i, (_, row) in enumerate(pos_inf_df.iterrows()):
-                    ax5.text(x5[i], ax5.get_ylim()[0] * 0.92,
-                             f"n={int(row['fight_count'])}",
-                             ha="center", va="top", fontsize=6.5, color="#4a5580")
-                plt.tight_layout(pad=0.4)
-                buf5 = io.BytesIO()
-                fig5.savefig(buf5, format="png", dpi=150, bbox_inches="tight", facecolor="#ffffff")
-                buf5.seek(0)
-                st.image(buf5, use_container_width=True)
-                plt.close(fig5)
-            else:
-                st.info("Position influence data not available.")
-            st.markdown(CARD_CLOSE, unsafe_allow_html=True)
-
+            
 with main_tab3:
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
     with st.spinner("Loading dominant fights..."):

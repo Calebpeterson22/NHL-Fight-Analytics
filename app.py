@@ -60,15 +60,6 @@ st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap');
 
-        /* ── PALETTE ──────────────────────────────────────────
-           Blue  primary:  #1d4ed8   dark: #1e3a8a
-           Orange accent:  #ea580c   hover: #c2410c
-           Bg:             #dde5f7   (deeper slate-blue)
-           Surface:        #ffffff
-           Text primary:   #0a0a20
-           Text muted:     #4a5580
-        ────────────────────────────────────────────────────── */
-
         html, body, [data-testid="stAppViewContainer"] {
             background: #dde5f7 !important;
             font-family: 'DM Sans', sans-serif;
@@ -231,7 +222,6 @@ st.markdown("""
             margin-top: 0.2rem;
         }
 
-        /* Section headers — orange underline accent */
         .section-header {
             font-family: 'Bebas Neue', sans-serif;
             font-size: 1.4rem;
@@ -452,7 +442,6 @@ def load_fight_coords(home_alias: str, away_alias: str, game_date: str) -> pd.Da
         return pd.DataFrame(columns=["fight_time", "coord_x", "coord_y"])
 
 @st.cache_data(ttl=300)
-# Remove @st.cache_data here — caching empty results hides failures
 def load_fight_video(home_alias: str, away_alias: str, game_date: str, home_fighter: str, away_fighter: str) -> str:
     try:
         home_last = home_fighter.split()[-1] if home_fighter else ""
@@ -485,7 +474,6 @@ def load_fight_video(home_alias: str, away_alias: str, game_date: str, home_figh
 
 @st.cache_data(ttl=300)
 def load_player_profile(full_name: str) -> pd.DataFrame:
-    # Guard against None / empty / "nan" values arriving from missing DB data
     if not full_name or str(full_name).strip() in ("", "nan", "None", "NaN"):
         return pd.DataFrame()
     safe_name = full_name.replace("'", "''")
@@ -556,11 +544,57 @@ def load_jersey_stats() -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
+
+# ─────────────────────────────────────────────
+# FIGHTER W-L RECORDS  (NEW)
+# ─────────────────────────────────────────────
+@st.cache_data(ttl=300)
+def load_fighter_records() -> pd.DataFrame:
+    """Returns a DataFrame with columns: player, player_last, wins, losses, fights"""
+    try:
+        fight_df = load_fight_stats()
+        if fight_df.empty:
+            return pd.DataFrame()
+
+        all_fighters = []
+        for _, row in fight_df.iterrows():
+            winner   = str(row["voted_winner"]).strip()
+            home_p   = str(row["home_player"]).strip()
+            away_p   = str(row["away_player"]).strip()
+            home_t   = str(row["home_team"]).strip()
+            away_t   = str(row["away_team"]).strip()
+
+            winner_last = winner.split()[-1].upper() if winner else ""
+            home_last   = home_p.split(".")[-1].strip().upper() if "." in home_p else home_p.split()[-1].upper()
+            away_last   = away_p.split(".")[-1].strip().upper() if "." in away_p else away_p.split()[-1].upper()
+
+            home_won = winner_last == home_last and winner_last != ""
+            away_won = winner_last == away_last and winner_last != ""
+
+            all_fighters.append({"player": home_p, "team": home_t, "won": home_won})
+            all_fighters.append({"player": away_p, "team": away_t, "won": away_won})
+
+        fighters_df = pd.DataFrame(all_fighters)
+        fighters_df = fighters_df[fighters_df["player"].notna() & (fighters_df["player"] != "nan")]
+
+        record_df = fighters_df.groupby("player").agg(
+            fights=("won", "count"),
+            wins=("won", "sum")
+        ).reset_index()
+        record_df["losses"] = record_df["fights"] - record_df["wins"]
+        # Normalise to last name for fuzzy matching
+        record_df["player_last"] = record_df["player"].apply(
+            lambda x: x.split(".")[-1].strip().upper() if "." in x else x.split()[-1].upper()
+        )
+        return record_df
+    except Exception:
+        return pd.DataFrame()
+
+
 # ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
 def _clean_fighter_name(raw) -> "str | None":
-    """Return a clean fighter name string, or None if the value is empty/null."""
     if raw is None:
         return None
     s = str(raw).strip()
@@ -592,6 +626,22 @@ def delta_arrow(val: float) -> str:
     elif val < -0.05:
         return f"▼ {val:.2f}"
     return f"→ {val:.2f}"
+
+
+# ─────────────────────────────────────────────
+# HELPER: look up record dict for a fighter name
+# ─────────────────────────────────────────────
+def _get_record(name: str, fighter_records: pd.DataFrame) -> dict:
+    """Return {'wins', 'losses', 'fights'} for a fighter by last name, or {}."""
+    if not name or fighter_records.empty:
+        return {}
+    name_last = name.split()[-1].upper()
+    match = fighter_records[fighter_records["player_last"] == name_last]
+    if not match.empty:
+        r = match.iloc[0]
+        return {"wins": int(r["wins"]), "losses": int(r["losses"]), "fights": int(r["fights"])}
+    return {}
+
 
 # ─────────────────────────────────────────────
 # TRANSFORMATIONS
@@ -863,28 +913,62 @@ def render_fight_cards(row: pd.Series):
 
 
 # ─────────────────────────────────────────────
-# PLAYER CARD
+# PLAYER CARD  (updated: accepts record dict)
 # ─────────────────────────────────────────────
-def render_player_card(player_df: pd.DataFrame, fighter_name: str, is_winner: bool, align: str = "left"):
-    lbl = '<span style="color:#1d4ed8;text-transform:uppercase;font-size:0.78rem;letter-spacing:0.1em;font-weight:500;">'
+def render_player_card(
+    player_df: pd.DataFrame,
+    fighter_name: str,
+    is_winner: bool,
+    align: str = "left",
+    record: dict = None,
+):
+    lbl = (
+        '<span style="color:#1d4ed8;text-transform:uppercase;'
+        'font-size:0.78rem;letter-spacing:0.1em;font-weight:500;">'
+    )
 
+    # ── Build W-L badge HTML ──────────────────────────────────────────────
+    if record and record.get("fights", 0) > 0:
+        wl_badge_html = (
+            f"<div style='display:inline-flex;gap:6px;margin:6px auto 10px;"
+            f"justify-content:center;flex-wrap:wrap;'>"
+            f"<span style='background:#1a8a4a22;border:1px solid #1a8a4a;color:#1a8a4a;"
+            f"font-size:0.7rem;padding:2px 10px;border-radius:3px;font-weight:700;'>"
+            f"{record['wins']}W</span>"
+            f"<span style='background:#c0233a22;border:1px solid #c0233a;color:#c0233a;"
+            f"font-size:0.7rem;padding:2px 10px;border-radius:3px;font-weight:700;'>"
+            f"{record['losses']}L</span>"
+            f"<span style='background:#eef2fc;border:1px solid #a8bae8;color:#4a5580;"
+            f"font-size:0.7rem;padding:2px 10px;border-radius:3px;'>"
+            f"{record['fights']} fights</span>"
+            f"</div>"
+        )
+    else:
+        wl_badge_html = ""
+
+    # ── Empty profile fallback ────────────────────────────────────────────
     if player_df.empty:
         st.markdown(
             "<div style='background:#ffffff;border:1px solid #b8c8f8;border-radius:14px;"
-            "box-shadow:0 2px 16px rgba(37,99,235,0.10);padding:2rem 1.5rem;text-align:center;height:100%;'>"
+            "box-shadow:0 2px 16px rgba(37,99,235,0.10);padding:2rem 1.5rem;"
+            "text-align:center;height:100%;'>"
             "<div style='width:150px;height:150px;border-radius:50%;background:#f4f7ff;"
             "border:3px solid #ea580c;margin:0 auto 16px;display:flex;align-items:center;"
             "justify-content:center;font-size:2.5rem;'>🏒</div>"
-            "<div style='font-size:1.5rem;font-weight:600;color:#0a0a20;margin-bottom:6px;'>" + str(fighter_name) + "</div>"
-            "<div style='font-size:0.9rem;color:#4a5580;margin-bottom:20px;'>Profile not available</div>"
-            "<div style='background:#f4f7ff;border-radius:10px;padding:1rem 1.2rem;text-align:center;'>"
-            "<div style='font-size:0.85rem;color:#4a5580;letter-spacing:0.08em;'>Stats unavailable</div>"
+            "<div style='font-size:1.5rem;font-weight:600;color:#0a0a20;margin-bottom:6px;'>"
+            + str(fighter_name)
+            + "</div>"
+            + wl_badge_html
+            + "<div style='background:#f4f7ff;border-radius:10px;padding:1rem 1.2rem;"
+            "text-align:center;'>"
+            "<div style='font-size:0.85rem;color:#4a5580;letter-spacing:0.08em;'>"
+            "Stats unavailable</div>"
             "</div></div>",
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
         return
 
-    p = player_df.iloc[0]
+    p    = player_df.iloc[0]
     name = str(p.get("full_name", fighter_name) or fighter_name)
     pos  = str(p.get("primary_position", "") or "—")
     num  = str(p.get("jersey_number", "") or "—")
@@ -910,30 +994,74 @@ def render_player_card(player_df: pd.DataFrame, fighter_name: str, is_winner: bo
     winner_badge = (
         "<span style='background:#2563eb;color:#fff;font-size:0.6rem;letter-spacing:0.1em;"
         "padding:2px 8px;border-radius:3px;margin-left:6px;text-transform:uppercase;'>Winner</span>"
-        if is_winner else ""
+        if is_winner
+        else ""
     )
 
     img_tag = (
-        "<img src='" + img + "' style='width:150px;height:150px;border-radius:50%;"
+        "<img src='"
+        + img
+        + "' style='width:150px;height:150px;border-radius:50%;"
         "object-fit:cover;border:3px solid #ea580c;margin-bottom:16px;'>"
-        if img else ""
+        if img
+        else ""
     )
 
     html = (
         "<div style='background:#ffffff;border:1px solid #b8c8f8;border-radius:14px;"
-        "box-shadow:0 2px 16px rgba(37,99,235,0.10);padding:2rem 1.5rem;text-align:center;height:100%;'>"
+        "box-shadow:0 2px 16px rgba(37,99,235,0.10);padding:2rem 1.5rem;"
+        "text-align:center;height:100%;'>"
         + img_tag
-        + "<div style='font-size:1.5rem;font-weight:600;color:#0a0a20;margin-bottom:6px;'>" + name + winner_badge + "</div>"
-        + "<div style='font-size:0.9rem;color:#4a5580;margin-bottom:20px;letter-spacing:0.04em;'>" + team + "</div>"
-        + "<div style='background:#f4f7ff;border-radius:10px;padding:1rem 1.2rem;text-align:left;'>"
-        + "<div style='font-size:0.95rem;color:#1e3a8a;line-height:1;'>"
-        + "<div style='margin-bottom:11px;display:flex;justify-content:space-between;'>" + lbl + "Position</span><span style='color:#0a0a20;font-weight:500;'>" + pos + "</span></div>"
-        + "<div style='margin-bottom:11px;display:flex;justify-content:space-between;'>" + lbl + "Jersey</span><span style='color:#0a0a20;font-weight:500;'>#" + num + "</span></div>"
-        + "<div style='margin-bottom:11px;display:flex;justify-content:space-between;'>" + lbl + "Height</span><span style='color:#0a0a20;font-weight:500;'>" + ht_str + "</span></div>"
-        + "<div style='margin-bottom:11px;display:flex;justify-content:space-between;'>" + lbl + "Weight</span><span style='color:#0a0a20;font-weight:500;'>" + wt + " lbs</span></div>"
-        + "<div style='margin-bottom:11px;display:flex;justify-content:space-between;'>" + lbl + "Shoots</span><span style='color:#0a0a20;font-weight:500;'>" + hand + "</span></div>"
-        + "<div style='margin-bottom:11px;display:flex;justify-content:space-between;'>" + lbl + "Experience</span><span style='color:#0a0a20;font-weight:500;'>" + exp + " yrs</span></div>"
-        + "<div style='display:flex;justify-content:space-between;'>" + lbl + "Salary</span><span style='color:#0a0a20;font-weight:500;'>" + sal_str + "</span></div>"
+        + "<div style='font-size:1.5rem;font-weight:600;color:#0a0a20;margin-bottom:6px;'>"
+        + name
+        + winner_badge
+        + "</div>"
+        # team name
+        + "<div style='font-size:0.9rem;color:#4a5580;margin-bottom:4px;"
+        "letter-spacing:0.04em;'>"
+        + team
+        + "</div>"
+        # ── W-L record badge ──
+        + wl_badge_html
+        # stat rows
+        + "<div style='background:#f4f7ff;border-radius:10px;padding:1rem 1.2rem;"
+        "text-align:left;margin-top:4px;'>"
+        "<div style='font-size:0.95rem;color:#1e3a8a;line-height:1;'>"
+        + "<div style='margin-bottom:11px;display:flex;justify-content:space-between;'>"
+        + lbl
+        + "Position</span><span style='color:#0a0a20;font-weight:500;'>"
+        + pos
+        + "</span></div>"
+        + "<div style='margin-bottom:11px;display:flex;justify-content:space-between;'>"
+        + lbl
+        + "Jersey</span><span style='color:#0a0a20;font-weight:500;'>#"
+        + num
+        + "</span></div>"
+        + "<div style='margin-bottom:11px;display:flex;justify-content:space-between;'>"
+        + lbl
+        + "Height</span><span style='color:#0a0a20;font-weight:500;'>"
+        + ht_str
+        + "</span></div>"
+        + "<div style='margin-bottom:11px;display:flex;justify-content:space-between;'>"
+        + lbl
+        + "Weight</span><span style='color:#0a0a20;font-weight:500;'>"
+        + wt
+        + " lbs</span></div>"
+        + "<div style='margin-bottom:11px;display:flex;justify-content:space-between;'>"
+        + lbl
+        + "Shoots</span><span style='color:#0a0a20;font-weight:500;'>"
+        + hand
+        + "</span></div>"
+        + "<div style='margin-bottom:11px;display:flex;justify-content:space-between;'>"
+        + lbl
+        + "Experience</span><span style='color:#0a0a20;font-weight:500;'>"
+        + exp
+        + " yrs</span></div>"
+        + "<div style='display:flex;justify-content:space-between;'>"
+        + lbl
+        + "Salary</span><span style='color:#0a0a20;font-weight:500;'>"
+        + sal_str
+        + "</span></div>"
         + "</div></div></div>"
     )
     st.markdown(html, unsafe_allow_html=True)
@@ -941,8 +1069,6 @@ def render_player_card(player_df: pd.DataFrame, fighter_name: str, is_winner: bo
 # ─────────────────────────────────────────────
 # RINK MAP
 # ─────────────────────────────────────────────
-
-
 
 RINK_URL = "https://raw.githubusercontent.com/Calebpeterson22/NHL-Fight-Analytics/main/hockey_rink_2.jpg"
 
@@ -1115,7 +1241,6 @@ with main_tab1:
             st.session_state["player_filter_idx"] = player_options.index(selected_player)
 
     with filter_col4:
-        # Apply both team and player filters
         if selected_team == "All Teams":
             filtered_fights = fights_index
         else:
@@ -1146,150 +1271,165 @@ with main_tab1:
     st.markdown("<hr style='border-color:#b8c8f8;margin:1rem 0;'>", unsafe_allow_html=True)
 
 with main_tab1:
-        if selected_fight_label is not None and not combined_index.empty and selected_fight_label in combined_index["fight_label"].values:
+    if selected_fight_label is not None and not combined_index.empty and selected_fight_label in combined_index["fight_label"].values:
 
-            fight_meta = combined_index[combined_index["fight_label"] == selected_fight_label].iloc[0]
-            home_alias    = fight_meta["home_alias"]
-            away_alias    = fight_meta["away_alias"]
-            game_date_str = str(fight_meta["date"])
+        fight_meta = combined_index[combined_index["fight_label"] == selected_fight_label].iloc[0]
+        home_alias    = fight_meta["home_alias"]
+        away_alias    = fight_meta["away_alias"]
+        game_date_str = str(fight_meta["date"])
 
-            with st.spinner("Loading fight effects..."):
-                try:
-                    effects_raw = load_fight_effects_by_game(home_alias, away_alias, game_date_str)
-                    effects_df  = prepare_fight_effects(effects_raw)
-                except Exception as e:
-                    st.error(f"Failed to load fight effects: {e}")
-                    st.stop()
-
-            if effects_df.empty:
-                st.warning("No fight effects data found for this fight.")
+        with st.spinner("Loading fight effects..."):
+            try:
+                effects_raw = load_fight_effects_by_game(home_alias, away_alias, game_date_str)
+                effects_df  = prepare_fight_effects(effects_raw)
+            except Exception as e:
+                st.error(f"Failed to load fight effects: {e}")
                 st.stop()
 
-            with st.spinner(f"Loading game data for {away_alias} @ {home_alias} on {game_date_str}..."):
-                try:
-                    raw_df = load_game_data(home_alias, away_alias, game_date_str)
-                except Exception as e:
-                    st.error(f"Failed to load game data: {e}")
-                    st.stop()
+        if effects_df.empty:
+            st.warning("No fight effects data found for this fight.")
+            st.stop()
 
-            if raw_df.empty:
-                st.warning(f"No game data found for {away_alias} @ {home_alias} on {game_date_str}.")
+        with st.spinner(f"Loading game data for {away_alias} @ {home_alias} on {game_date_str}..."):
+            try:
+                raw_df = load_game_data(home_alias, away_alias, game_date_str)
+            except Exception as e:
+                st.error(f"Failed to load game data: {e}")
                 st.stop()
 
-            filtered_df = transform(raw_df)
+        if raw_df.empty:
+            st.warning(f"No game data found for {away_alias} @ {home_alias} on {game_date_str}.")
+            st.stop()
 
-            fight_winner = str(effects_df["fight_winning_team"].iloc[0]).lower() if not effects_df.empty else ""
-            home_name = filtered_df["home_name"].iloc[0] if not filtered_df.empty else home_alias
-            away_name = filtered_df["away_name"].iloc[0] if not filtered_df.empty else away_alias
-            voted = fight_meta.get("voted_winner", "Unknown") or "Unknown"
+        filtered_df = transform(raw_df)
 
-            winner_rows = effects_df[effects_df["voted_winner"] == voted] if not effects_df.empty else pd.DataFrame()
-            winning_team_full = winner_rows["attrib_team_full_name"].iloc[0] if not winner_rows.empty else None
+        fight_winner = str(effects_df["fight_winning_team"].iloc[0]).lower() if not effects_df.empty else ""
+        home_name = filtered_df["home_name"].iloc[0] if not filtered_df.empty else home_alias
+        away_name = filtered_df["away_name"].iloc[0] if not filtered_df.empty else away_alias
+        voted = fight_meta.get("voted_winner", "Unknown") or "Unknown"
 
-            if winning_team_full and winning_team_full == home_name:
-                title_html = f'{away_name} @ <b style="color:#0a0a20">{home_name}</b>'
-            elif winning_team_full and winning_team_full == away_name:
-                title_html = f'<b style="color:#0a0a20">{away_name}</b> @ {home_name}'
-            else:
-                title_html = f'{away_name} @ {home_name}'
+        winner_rows = effects_df[effects_df["voted_winner"] == voted] if not effects_df.empty else pd.DataFrame()
+        winning_team_full = winner_rows["attrib_team_full_name"].iloc[0] if not winner_rows.empty else None
 
-            fight_time_str = seconds_to_mmss(float(fight_meta["fight_time"])) if "fight_time" in fight_meta else ""
+        if winning_team_full and winning_team_full == home_name:
+            title_html = f'{away_name} @ <b style="color:#0a0a20">{home_name}</b>'
+        elif winning_team_full and winning_team_full == away_name:
+            title_html = f'<b style="color:#0a0a20">{away_name}</b> @ {home_name}'
+        else:
+            title_html = f'{away_name} @ {home_name}'
 
-            st.markdown(
-                f'<div style="margin-bottom:1.2rem;text-align:center;">'
-                f'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.8rem;letter-spacing:0.06em;color:#0a0a20;line-height:1.1;">'
-                f'{title_html}'
-                f'</div>'
-                f'<div style="font-size:0.72rem;letter-spacing:0.14em;text-transform:uppercase;color:#4a5580;margin-top:0.3rem;">'
-                f'{game_date_str} &nbsp;·&nbsp; Fight at {fight_time_str} &nbsp;·&nbsp; Winner: {voted}'
-                f'</div>'
-                f'</div>',
-                unsafe_allow_html=True
+        fight_time_str = seconds_to_mmss(float(fight_meta["fight_time"])) if "fight_time" in fight_meta else ""
+
+        st.markdown(
+            f'<div style="margin-bottom:1.2rem;text-align:center;">'
+            f'<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.8rem;letter-spacing:0.06em;color:#0a0a20;line-height:1.1;">'
+            f'{title_html}'
+            f'</div>'
+            f'<div style="font-size:0.72rem;letter-spacing:0.14em;text-transform:uppercase;color:#4a5580;margin-top:0.3rem;">'
+            f'{game_date_str} &nbsp;·&nbsp; Fight at {fight_time_str} &nbsp;·&nbsp; Winner: {voted}'
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+        selected_ft = float(fight_meta["fight_time"]) if "fight_time" in fight_meta else None
+
+        selected_fight_row = effects_df[effects_df["fight_time"] == selected_ft] if selected_ft is not None else effects_df
+        if selected_fight_row.empty:
+            selected_fight_row = effects_df
+        home_fighter_name = _clean_fighter_name(
+            selected_fight_row["home_fighter"].iloc[0]
+            if "home_fighter" in selected_fight_row.columns and not selected_fight_row.empty
+            else None
+        )
+        away_fighter_name = _clean_fighter_name(
+            selected_fight_row["away_fighter"].iloc[0]
+            if "away_fighter" in selected_fight_row.columns and not selected_fight_row.empty
+            else None
+        )
+
+        home_player_df = pd.DataFrame()
+        away_player_df = pd.DataFrame()
+        if home_fighter_name:
+            try:
+                home_player_df = load_player_profile(home_fighter_name)
+            except Exception:
+                home_player_df = pd.DataFrame()
+        if away_fighter_name:
+            try:
+                away_player_df = load_player_profile(away_fighter_name)
+            except Exception:
+                away_player_df = pd.DataFrame()
+
+        # ── Load W-L records and look up each fighter ─────────────────────
+        fighter_records = load_fighter_records()
+        away_record = _get_record(away_fighter_name, fighter_records)
+        home_record = _get_record(home_fighter_name, fighter_records)
+
+        col_away, col_chart, col_home = st.columns([1.4, 4, 1.4])
+        with col_away:
+            render_player_card(
+                away_player_df,
+                away_fighter_name or "Away Fighter",
+                is_winner=(bool(away_fighter_name) and voted == away_fighter_name),
+                align="left",
+                record=away_record,
+            )
+        with col_chart:
+            chart = build_goal_chart(filtered_df, selected_fight_time=selected_ft)
+            fig = chart.draw()
+            fig.set_size_inches(14, 7)
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", dpi=160, bbox_inches="tight", facecolor="#f0f4ff")
+            buf.seek(0)
+            st.image(buf, use_container_width=True)
+            plt.close(fig)
+        with col_home:
+            render_player_card(
+                home_player_df,
+                home_fighter_name or "Home Fighter",
+                is_winner=(bool(home_fighter_name) and voted == home_fighter_name),
+                align="left",
+                record=home_record,
             )
 
-            selected_ft = float(fight_meta["fight_time"]) if "fight_time" in fight_meta else None
+        st.markdown("<hr style='border-color:#b8c8f8;margin:1.2rem 0;'>", unsafe_allow_html=True)
 
-            selected_fight_row = effects_df[effects_df["fight_time"] == selected_ft] if selected_ft is not None else effects_df
-            if selected_fight_row.empty:
-                selected_fight_row = effects_df
-            home_fighter_name = _clean_fighter_name(
-                selected_fight_row["home_fighter"].iloc[0]
-                if "home_fighter" in selected_fight_row.columns and not selected_fight_row.empty
-                else None
-            )
-            away_fighter_name = _clean_fighter_name(
-                selected_fight_row["away_fighter"].iloc[0]
-                if "away_fighter" in selected_fight_row.columns and not selected_fight_row.empty
-                else None
-            )
+        with st.spinner("Loading fight location..."):
+            try:
+                coords_df = load_fight_coords(home_alias, away_alias, game_date_str)
+            except Exception:
+                coords_df = pd.DataFrame(columns=["fight_time", "coord_x", "coord_y"])
 
-            home_player_df = pd.DataFrame()
-            away_player_df = pd.DataFrame()
-            if home_fighter_name:
-                try:
-                    home_player_df = load_player_profile(home_fighter_name)
-                except Exception:
-                    home_player_df = pd.DataFrame()
-            if away_fighter_name:
-                try:
-                    away_player_df = load_player_profile(away_fighter_name)
-                except Exception:
-                    away_player_df = pd.DataFrame()
+        video_url = load_fight_video(home_alias, away_alias, game_date_str,
+                                     home_fighter_name or "", away_fighter_name or "")
 
-            col_away, col_chart, col_home = st.columns([1.4, 4, 1.4])
-            with col_away:
-                render_player_card(away_player_df, away_fighter_name or "Away Fighter",
-                                   is_winner=(bool(away_fighter_name) and voted == away_fighter_name), align="left")
-            with col_chart:
-                chart = build_goal_chart(filtered_df, selected_fight_time=selected_ft)
-                fig = chart.draw()
-                fig.set_size_inches(14, 7)
-                buf = io.BytesIO()
-                fig.savefig(buf, format="png", dpi=160, bbox_inches="tight", facecolor="#f0f4ff")
-                buf.seek(0)
-                st.image(buf, use_container_width=True)
-                plt.close(fig)
-            with col_home:
-                render_player_card(home_player_df, home_fighter_name or "Home Fighter",
-                                   is_winner=(bool(home_fighter_name) and voted == home_fighter_name), align="left")
-
-            st.markdown("<hr style='border-color:#b8c8f8;margin:1.2rem 0;'>", unsafe_allow_html=True)
-
-            with st.spinner("Loading fight location..."):
-                try:
-                    coords_df = load_fight_coords(home_alias, away_alias, game_date_str)
-                except Exception:
-                    coords_df = pd.DataFrame(columns=["fight_time", "coord_x", "coord_y"])
-
-            video_url = load_fight_video(home_alias, away_alias, game_date_str,
-                                         home_fighter_name or "", away_fighter_name or "")
-
-            if video_url:
-                col_rink, col_vid = st.columns(2)
-                with col_rink:
-                    rink_fig = build_rink_map(coords_df, selected_fight_time=selected_ft)
-                    buf = io.BytesIO()
-                    rink_fig.savefig(buf, format="png", dpi=160, bbox_inches="tight", facecolor="#f0f4ff")
-                    buf.seek(0)
-                    st.image(buf, use_container_width=True)
-                    plt.close(rink_fig)
-                with col_vid:
-                    st.video(video_url)
-            else:
+        if video_url:
+            col_rink, col_vid = st.columns(2)
+            with col_rink:
                 rink_fig = build_rink_map(coords_df, selected_fight_time=selected_ft)
                 buf = io.BytesIO()
                 rink_fig.savefig(buf, format="png", dpi=160, bbox_inches="tight", facecolor="#f0f4ff")
                 buf.seek(0)
                 st.image(buf, use_container_width=True)
                 plt.close(rink_fig)
-
+            with col_vid:
+                st.video(video_url)
         else:
-            st.markdown(
-                '<p style="color:#4a5580; font-family:\'DM Sans\',sans-serif; font-size:0.85rem; '
-                'letter-spacing:0.1em; text-transform:uppercase;">Select a fight above to load the dashboard</p>',
-                unsafe_allow_html=True
-            )
-            
+            rink_fig = build_rink_map(coords_df, selected_fight_time=selected_ft)
+            buf = io.BytesIO()
+            rink_fig.savefig(buf, format="png", dpi=160, bbox_inches="tight", facecolor="#f0f4ff")
+            buf.seek(0)
+            st.image(buf, use_container_width=True)
+            plt.close(rink_fig)
+
+    else:
+        st.markdown(
+            '<p style="color:#4a5580; font-family:\'DM Sans\',sans-serif; font-size:0.85rem; '
+            'letter-spacing:0.1em; text-transform:uppercase;">Select a fight above to load the dashboard</p>',
+            unsafe_allow_html=True
+        )
+
 with main_tab2:
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
     with st.spinner("Loading fight statistics..."):
@@ -1396,11 +1536,8 @@ with main_tab2:
         # ── 3-COLUMN DASHBOARD ─────────────────────────────────────────────
         col1, col2, col3 = st.columns(3)
 
-        # ── COL 1: Top Fighters  +  Jersey Numbers ─────────────────────────
-        col1, col2, col3 = st.columns(3)
-
         with col1:
-    # Chart 1 — Fighter Lollipop Chart
+            # Chart 1 — Fighter Lollipop Chart
             st.markdown(_card("Top Fighters by Win %"), unsafe_allow_html=True)
             scatter_df = record_df[record_df["fights"] >= 0].copy()
             scatter_df["last"] = scatter_df["player"].apply(
@@ -1414,7 +1551,6 @@ with main_tab2:
 
             dot_colors = ["#1a8a4a" if w >= 50 else "#ea580c" for w in top10["win_pct"]]
 
-            # Stems
             ax1.hlines(
                 y=top10["last"],
                 xmin=0,
@@ -1424,7 +1560,6 @@ with main_tab2:
                 zorder=1,
             )
 
-            # Dots
             ax1.scatter(
                 top10["win_pct"],
                 top10["last"],
@@ -1435,19 +1570,19 @@ with main_tab2:
                 linewidths=0.8,
             )
 
-            # Labels on each dot
             for _, r in top10.iterrows():
                 ax1.text(
-                    r["win_pct"] + 0.5,
+                    r["win_pct"] + 2,
                     r["last"],
                     f'{int(r["win_pct"])}% ({int(r["fights"])} fights)',
                     va="center",
-                    fontsize=6,
+                    fontsize=7.5,
                     color="#0d0d26",
                 )
 
             ax1.set_xlabel("Win %", color="#4a65c0", fontsize=8)
-            ax1.set_xlim(0, 115)
+            ax1.tick_params(axis="x", labelbottom=False)
+            ax1.set_xlim(0, 125)
             ax1.tick_params(axis="y", labelsize=7)
             ax1.grid(axis="x", color="#e0e7f5", linewidth=0.5, zorder=0)
 
@@ -1468,6 +1603,7 @@ with main_tab2:
             st.image(buf1, use_container_width=True)
             plt.close(fig1)
             st.markdown(CARD_CLOSE, unsafe_allow_html=True)
+
             # Chart 3 — Jersey Numbers
             st.markdown(_card("Most Common Jersey #s"), unsafe_allow_html=True)
             if not jersey_df.empty:
@@ -1552,7 +1688,6 @@ with main_tab2:
             st.markdown(CARD_CLOSE, unsafe_allow_html=True)
 
         with col2:
-            # Chart 2 — Most Fight-Prone Teams
             # Chart 2 — Team Treemap
             import squarify
 
@@ -1583,7 +1718,6 @@ with main_tab2:
             st.image(buf2, use_container_width=True)
             plt.close(fig2)
             st.markdown(CARD_CLOSE, unsafe_allow_html=True)
-
 
             # Chart 4 — Fight Volume by Position
             st.markdown(_card("Fights by Position"), unsafe_allow_html=True)
@@ -1659,7 +1793,7 @@ with main_tab2:
             else:
                 st.info("Position influence data not available.")
             st.markdown(CARD_CLOSE, unsafe_allow_html=True)
-        # ── COL 3: Team Bruisers table  +  Goals Delta chart ──────────────
+
         with col3:
             # Table — Team Bruisers
             st.markdown(_card("Team Bruisers"), unsafe_allow_html=True)
@@ -1687,7 +1821,6 @@ with main_tab2:
             )
             st.markdown(CARD_CLOSE, unsafe_allow_html=True)
 
-            
 with main_tab3:
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
     with st.spinner("Loading dominant fights..."):
@@ -1755,11 +1888,7 @@ with main_tab3:
                 f"<div style='background:#ffffff;border:1.5px solid #a8bae8;border-radius:14px;"
                 f"box-shadow:0 2px 16px rgba(37,99,235,0.10);padding:1.1rem 1.4rem;"
                 f"margin-bottom:0.75rem;display:flex;align-items:center;gap:1.2rem;'>"
-
-                # Rank badge
                 f"{rank_badge}"
-
-                # Fighter info
                 f"<div style='flex:1;min-width:0;'>"
                 f"<div style='font-size:1.05rem;font-weight:700;color:#0a0a20;'>{row['voted_winner']}"
                 f"<span style='font-weight:400;color:#4a5580;font-size:0.9rem;'> def. {loser}</span></div>"
@@ -1767,25 +1896,18 @@ with main_tab3:
                 f"{row['away_team']} @ {row['home_team']}"
                 f"{'  ·  ' + date_str if date_str else ''}</div>"
                 f"</div>"
-
-                # Win %
                 f"<div style='text-align:center;min-width:80px;'>"
                 f"<div style='font-size:1.4rem;font-weight:800;color:{pct_color};line-height:1;'>{pct}%</div>"
                 f"<div style='font-size:0.6rem;color:#4a5580;text-transform:uppercase;letter-spacing:0.1em;margin-top:2px;'>Win Vote</div>"
                 f"</div>"
-
-                # Rating
                 f"<div style='text-align:center;min-width:70px;'>"
                 f"<div style='font-size:1.4rem;font-weight:800;color:#2563eb;line-height:1;'>{rating}</div>"
                 f"<div style='font-size:0.6rem;color:#4a5580;text-transform:uppercase;letter-spacing:0.1em;margin-top:2px;'>Rating</div>"
                 f"</div>"
-
-                # Votes
                 f"<div style='text-align:center;min-width:60px;'>"
                 f"<div style='font-size:1.1rem;font-weight:600;color:#4a5580;line-height:1;'>{votes}</div>"
                 f"<div style='font-size:0.6rem;color:#4a5580;text-transform:uppercase;letter-spacing:0.1em;margin-top:2px;'>Votes</div>"
                 f"</div>"
-
                 f"</div>"
             )
 
